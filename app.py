@@ -33,6 +33,9 @@ def handle_message(event):
         response = model.generate_content(user_text)
         reply_text = response.text
     except Exception as e:
+        # --- 加上這行 ---
+        print(f"!!! 真正的錯誤原因在此: {e}") 
+        # ----------------
         reply_text = "抱歉，我現在有點累，請稍後再試。"
         print(f"Error: {e}")
 
@@ -43,4 +46,5 @@ def handle_message(event):
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
+
     app.run(host='0.0.0.0', port=port)
