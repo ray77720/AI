@@ -4,7 +4,7 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from google import genai
+from google import genai  # 使用 2026 新版 SDK
 
 app = Flask(__name__)
 
@@ -16,14 +16,6 @@ GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 line_bot_api = LineBotApi(LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
 client = genai.Client(api_key=GEMINI_KEY)
-
-# 啟動時自動列出可用模型 (輸出在 Render Logs)
-print("--- [啟動診斷] 您的金鑰目前支援的模型如下 ---", flush=True)
-try:
-    for m in client.models.list():
-        print(f"可用模型: {m.name}", flush=True)
-except Exception as e:
-    print(f"診斷失敗: {e}", flush=True)
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -39,24 +31,26 @@ def callback():
 def handle_message(event):
     user_text = event.message.text
     
-    # 針對 limit: 0 的狀況，我們依序嘗試不同型號
-    # 2.0 沒額度就換 1.5，1.5 沒額度就換 1.5-8b
-    models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b']
+    # 2.0 若回報 limit: 0，則強制切換至 1.5 系列
+    # 這裡使用正確的模型字串，避免之前的 404 錯誤
+    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-2.0-flash']
     final_reply = "AI 目前完全無法連線，可能是 Google 伺服器今日波動導致配額歸零。"
 
     for model_name in models_to_try:
         try:
+            # 2026 新版呼叫語法
             response = client.models.generate_content(
                 model=model_name, 
                 contents=user_text
             )
-            final_reply = response.text
-            break # 成功就跳出
+            if response.text:
+                final_reply = response.text
+                break
         except Exception as e:
             err_msg = str(e)
-            print(f"嘗試 {model_name} 失敗: {err_msg}", flush=True)
-            if "429" in err_msg:
-                continue # 換下一個模型再試
+            print(f"嘗試模型 {model_name} 失敗: {err_msg}", flush=True)
+            if "429" in err_msg or "404" in err_msg:
+                continue # 換下一個試試
             else:
                 final_reply = f"呼叫失敗原因：{err_msg[:100]}"
                 break
