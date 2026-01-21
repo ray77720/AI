@@ -1,35 +1,20 @@
 import os
-import sys
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from google import genai  # 2026 最新版 SDK
+from google import genai  # 使用 2026 新版 SDK
 
 app = Flask(__name__)
 
-# --- 1. 環境變數讀取 ---
-# 請確保 Render 設定中的 Key 名稱與下方完全一致
+# --- 環境變數讀取 ---
 LINE_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_SECRET = os.getenv('LINE_CHANNEL_SECRET')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 初始化 LINE API
 line_bot_api = LineBotApi(LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
-
-# 初始化 Gemini 2026 客戶端
 client = genai.Client(api_key=GEMINI_KEY)
-
-# --- 2. 啟動診斷：列出可用模型 (輸出在 Render Logs) ---
-print("--- [系統啟動] 正在掃描您的 API Key 可用模型 ---", flush=True)
-try:
-    models = client.models.list()
-    print("您目前的專案支援以下模型：", flush=True)
-    for m in models:
-        print(f" - {m.name}", flush=True)
-except Exception as e:
-    print(f"無法取得模型清單，請檢查 API Key 是否正確: {e}", flush=True)
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -38,7 +23,6 @@ def callback():
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
-        print("Webhook 驗證失敗，請檢查 LINE_CHANNEL_SECRET", flush=True)
         abort(400)
     return 'OK'
 
@@ -46,18 +30,32 @@ def callback():
 def handle_message(event):
     user_text = event.message.text
     
-    # 策略：優先使用 1.5-flash，因為它的免費額度通常最寬鬆，較不容易出現 limit: 0
-    # 如果您想挑戰 2.0，請將其改為 'gemini-2.0-flash'
-    primary_model = 'gemini-1.5-flash'
-    
-    try:
-        # 呼叫 Gemini
-        response = client.models.generate_content(
-            model=primary_model, 
-            contents=user_text
-        )
-        reply_text = response.text
-        
-    except Exception as e:
-        err_msg = str(e)
-        print(f"！！！Gemini 呼叫失敗: {err_msg}",
+    # 策略：如果 2.0 報錯 limit 0，自動降級到 1.5 試試
+    models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash']
+    reply_text = "AI 目前暫時無法回應，請稍後再試。"
+
+    for model_name in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model_name, 
+                contents=user_text
+            )
+            reply_text = response.text
+            break # 成功獲取回應，跳出迴圈
+        except Exception as e:
+            err_msg = str(e)
+            print(f"嘗試模型 {model_name} 失敗: {err_msg}", flush=True)
+            # 如果是 429 且還有下一個模型，則繼續嘗試
+            if "429" in err_msg and model_name != models_to_try[-1]:
+                continue
+            reply_text = f"AI 呼叫失敗。原因：{err_msg[:100]}"
+            break
+
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply_text)
+    )
+
+if __name__ == "__main__":
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
