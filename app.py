@@ -21,6 +21,14 @@ handler = WebhookHandler(LINE_SECRET)
 # 初始化 2026 Gemini 客戶端
 client = genai.Client(api_key=GEMINI_KEY)
 
+# 在 app.py 的初始化段落加入這幾行
+try:
+    print("--- 正在查詢可用模型清單 ---", flush=True)
+    for m in client.models.list():
+        print(f"可用模型名稱: {m.name}", flush=True)
+except Exception as diagnose_e:
+    print(f"無法取得模型清單: {diagnose_e}", flush=True)
+    
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
@@ -73,4 +81,5 @@ if __name__ == "__main__":
     # 支援 Render 分配的連接埠
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
 
