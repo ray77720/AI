@@ -1,10 +1,9 @@
 import os
-import sys
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from google import genai  # 2026 新版 SDK
+from google import genai  # 使用 2026 新版 SDK
 
 app = Flask(__name__)
 
@@ -34,15 +33,16 @@ def handle_message(event):
     user_text = event.message.text
     try:
         # 使用 2026 最新模型與語法
+        # 注意：2026 年建議使用 gemini-2.0-flash 或最新穩定版
         response = client.models.generate_content(
             model='gemini-2.0-flash', 
             contents=user_text
         )
         reply_text = response.text
     except Exception as e:
-        # 加上 flush=True 確保日誌立即顯示
-        print(f"！！！Gemini 報錯了: {e}", flush=True)
-        reply_text = f"AI 呼叫失敗，原因：{str(e)[:50]}"
+        # 發生錯誤時直接印出，方便你在 Render 日誌查看
+        print(f"！！！Gemini 報錯了: {e}")
+        reply_text = f"AI 目前無法處理您的訊息。\n錯誤原因：{str(e)[:100]}"
 
     line_bot_api.reply_message(
         event.reply_token,
