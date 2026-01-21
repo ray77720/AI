@@ -3,11 +3,12 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from google import genai  # 2026 新版 SDK
+from google import genai  # 使用 2026 新版 SDK
 
 app = Flask(__name__)
 
-# 讀取環境變數
+# --- 環境變數讀取 ---
+# 請確保 Render 設定中的 Key 名稱如下
 LINE_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_SECRET = os.getenv('LINE_CHANNEL_SECRET')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
@@ -30,32 +31,35 @@ def callback():
 def handle_message(event):
     user_text = event.message.text
     
-    # 策略：優先使用 1.5-flash，因為它在 2026 年配額最穩定
-    # 若失敗則嘗試 2.0-flash
-    models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash']
-    reply_text = "AI 服務目前不穩定，請稍後再試。"
+    # 根據您的診斷清單，gemini-2.0-flash 是確定可用的模型
+    target_model = 'gemini-3-pro-preview'
+    
+    try:
+        # 使用 2026 最新 SDK 呼叫語法
+        response = client.models.generate_content(
+            model=target_model, 
+            contents=user_text
+        )
+        reply_text = response.text
+        
+    except Exception as e:
+        err_msg = str(e)
+        print(f"！！！Gemini 呼叫失敗: {err_msg}", flush=True)
+        
+        # 針對今日 Google 伺服器不穩 (Limit: 0) 的特殊提示
+        if "429" in err_msg:
+            reply_text = "【系統通知】Google 伺服器目前配額校驗異常 (Limit: 0)，這通常是暫時性的，請一分鐘後再試一次。"
+        else:
+            reply_text = f"AI 暫時無法回應。原因：{err_msg[:50]}..."
 
-    for model_name in models_to_try:
-        try:
-            # 2026 最新呼叫語法，自動避開 v1beta 錯誤
-            response = client.models.generate_content(
-                model=model_name,
-                contents=user_text
-            )
-            if response and response.text:
-                reply_text = response.text
-                break
-        except Exception as e:
-            print(f"DEBUG: {model_name} 失敗原因: {e}", flush=True)
-            continue
-
+    # 回傳給 LINE 使用者
     try:
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=reply_text)
         )
-    except Exception as e:
-        print(f"DEBUG: LINE 回傳失敗: {e}", flush=True)
+    except Exception as line_e:
+        print(f"！！！LINE 回傳失敗: {line_e}", flush=True)
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
