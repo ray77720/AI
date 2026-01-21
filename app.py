@@ -38,7 +38,7 @@ def handle_message(event):
     
     # 這裡預設使用 1.5-flash，因為您的 2.0-flash 目前回報 429 額度錯誤
     # 在 2026 年，1.5-flash 的免費配額通常比 2.0 系列更穩定
-    target_model = 'gemini-1.5-flash' 
+    target_model = 'gemini-2.0-flash' 
     
     try:
         # 呼叫 Gemini 產生內容
@@ -73,3 +73,4 @@ if __name__ == "__main__":
     # 支援 Render 分配的連接埠
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
