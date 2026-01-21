@@ -3,7 +3,8 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from google import genai  # 2026 新版 SDK
+from google import genai
+from google.genai import types  # 引入搜尋工具類型
 
 app = Flask(__name__)
 
@@ -30,28 +31,35 @@ def callback():
 def handle_message(event):
     user_text = event.message.text
     
-    # 鎖定您診斷清單中確認存在的 3.0 預覽版模型
-    target_model = 'gemma-3-27b-it'
+    # 關鍵字觸發邏輯：G 開頭才回應
+    if not user_text.lower().startswith('g'):
+        return
     
+    ai_question = user_text[1:].strip()
+    if not ai_question:
+        return
+
     try:
-        # 使用 2026 最新 SDK 呼叫語法
-        response = client.models.generate_content(
-            model=target_model, 
-            contents=user_text
+        # 設定搜尋工具
+        google_search_tool = types.Tool(
+            google_search_retrieval=types.GoogleSearchRetrieval()
         )
+
+        # 呼叫 3.0 模型並開啟 Google 搜尋能力
+        response = client.models.generate_content(
+            model='gemini-3-pro-preview', 
+            contents=ai_question,
+            config=types.GenerateContentConfig(
+                tools=[google_search_tool]  # 加入搜尋工具
+            )
+        )
+        
         reply_text = response.text
         
     except Exception as e:
-        err_msg = str(e)
-        print(f"！！！Gemini 3.0 呼叫失敗: {err_msg}", flush=True)
-        
-        # 針對今日 Google 伺服器波動 (Limit: 0) 的處理
-        if "429" in err_msg:
-            reply_text = "【系統通知】Gemini 3.0 目前請求量極高且 Google 伺服器波動中，請一分鐘後再試。"
-        else:
-            reply_text = f"AI 暫時無法回應。原因：{err_msg[:50]}..."
+        print(f"！！！呼叫失敗: {e}", flush=True)
+        reply_text = "抱歉，連線異常，請稍後再試。"
 
-    # 回傳給 LINE 使用者
     try:
         line_bot_api.reply_message(
             event.reply_token,
