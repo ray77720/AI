@@ -1,12 +1,14 @@
 import os
+import sys
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from google import genai
 
 app = Flask(__name__)
 
-# --- 讀取環境變數 ---
+# --- 環境變數讀取 ---
 LINE_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_SECRET = os.getenv('LINE_CHANNEL_SECRET')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
@@ -21,8 +23,7 @@ def callback():
     body = request.get_data(as_text=True)
     try:
         handler.handle(body, signature)
-    except Exception as e:
-        print(f"Webhook 錯誤: {e}", flush=True)
+    except InvalidSignatureError:
         abort(400)
     return 'OK'
 
@@ -36,24 +37,35 @@ def handle_message(event):
     if not ai_question:
         return
 
-    try:
-        # 直接使用免費版最穩定的模型名，不帶額外工具以避開 v1beta 報錯
-        response = client.models.generate_content(
-            model='gemini-1.5-flash', 
-            contents=ai_question
-        )
-        reply_text = response.text
-        
-    except Exception as e:
-        err_msg = str(e)
-        print(f"！！！模型呼叫失敗: {err_msg}", flush=True)
-        # 針對 429 進行友善回覆
-        if "429" in err_msg:
-            reply_text = "【系統通知】Google 目前暫時關閉了免費 API 配額，請稍後再試。"
-        else:
-            reply_text = f"抱歉，連線異常，請稍後再試。"
+    # 模型嘗試清單：優先用 3.0，失敗就換成免費版最穩定的 1.5
+    # 注意：針對免費版，我們改用最單純的呼叫方式避開路徑錯誤
+    model_list = ['gemini-3-pro-preview', 'gemini-1.5-flash']
+    reply_text = ""
 
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+    for model_name in model_list:
+        try:
+            print(f"正在嘗試呼叫模型: {model_name}...", flush=True)
+            response = client.models.generate_content(
+                model=model_name, 
+                contents=ai_question
+            )
+            if response.text:
+                reply_text = response.text
+                print(f"成功使用 {model_name} 回覆！", flush=True)
+                break
+        except Exception as e:
+            err_msg = str(e)
+            print(f"模型 {model_name} 失敗: {err_msg}", flush=True)
+            if model_name == model_list[-1]:
+                reply_text = "【系統提示】目前免費版 API 配額已達上限或路徑異常，請稍後再試。"
+
+    try:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply_text)
+        )
+    except Exception as line_e:
+        print(f"！！！LINE 回傳失敗: {line_e}", flush=True)
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
